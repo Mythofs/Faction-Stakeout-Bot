@@ -36,6 +36,4 @@ for(const file of eventFiles) {
     }
 }
 
-client.once('clientReady', async () => {
-});
 client.login(process.env.TOKEN);

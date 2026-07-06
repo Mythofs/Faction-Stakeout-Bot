@@ -11,22 +11,23 @@ module.exports = {
             const facId = interaction.options.getString("facid", true);
             if(stakeoutStore.has(facId))
                 return await interaction.reply(`Already staking out ${facId}`);
-            await interaction.reply(`Started staking out ${facId}`);
+            const facInfo = await safeFetch(`https://api.torn.com/v2/faction/${facId}/basic?comment=Faction%20Stakeout&key=${process.env.API_KEY}`);
+            await interaction.reply(`Started staking out ${facInfo.basic.name} (${facId})`);
             const channel = interaction.client.channels.cache.get(process.env.CHANNEL_ID);
             const reply = await checkStatus(process.env.API_KEY, facId, channel);
             let message;
             if(reply.length >= 4000)
                 message = await channel.send("Message too long, exceeds 4000 characters");
             else
-                message = await channel.send(reply);
+                message = await channel.send(`${facInfo.basic.name} (${facId}) ${reply}`);
             const intervalId = setInterval(async() => {
                 const reply = await checkStatus(process.env.API_KEY, facId, channel);
                 if(reply.length >= 4000)
                     await message.edit("Message too long, exceeds 4000 characters");
                 else
-                    await message.edit(reply);
+                    await message.edit(`${facInfo.basic.name} (${facId}) ${reply}`);
             }, 30000);
-            stakeoutStore.set(facId, {"interval": intervalId, "message": message.id});
+            stakeoutStore.set(facId, {"interval": intervalId, "message": message.id, "info": facInfo});
         }
         catch(e) {
             console.log(e);
@@ -38,7 +39,7 @@ async function checkStatus(apiKey, facId, channel)
 {
     try {
         const memberData = await safeFetch(`https://api.torn.com/v2/faction/${facId}/members?striptags=true&timestamp=${Date.now()/1000}&comment=Faction%20Stakeout&key=${apiKey}`, channel);
-        let reply =`${facId} Available Targets:`;
+        let reply =`Available Targets:`;
         const ids = [];
         const targets = [];
         for(const member of memberData.members) {
