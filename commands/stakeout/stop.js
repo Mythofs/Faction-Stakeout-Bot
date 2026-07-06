@@ -9,8 +9,11 @@ module.exports = {
             const facId = interaction.options.getString("facid", true);
             if(!stakeoutStore.has(facId))
                 return interaction.reply(`Not staking out ${facId}`);
-            const intervalId = stakeoutStore.get(facId);
-            clearInterval(intervalId);
+            const info = stakeoutStore.get(facId);
+            clearInterval(info.interval);
+            const channel = interaction.client.channels.cache.get(process.env.CHANNEL_ID);
+            const message = await channel.messages.fetch(info.message);
+            await message.delete();
             stakeoutStore.delete(facId);
             return interaction.reply(`Stopped staking out ${facId}`);
         }

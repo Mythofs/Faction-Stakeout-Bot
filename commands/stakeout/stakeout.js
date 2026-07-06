@@ -7,20 +7,32 @@ module.exports = {
     data: new SlashCommandBuilder().setName("stakeout").setDescription("Starts staking out a faction")
         .addStringOption((option) => option.setName("facid").setDescription("The faction to stakeout").setRequired(true)), 
     async execute(interaction) {
-        const facId = interaction.options.getString("facid", true);
-        if(stakeoutStore.has(facId))
-            return await interaction.reply(`Already staking out ${facId}`);
-        await interaction.reply(`Started staking out ${facId}`);
-        const channel = interaction.client.channels.cache.get(process.env.CHANNEL_ID);
-        const reply = await checkStatus(process.env.API_KEY, facId, channel);
-        await interaction.editReply(reply);
-        const intervalId = setInterval(async() => {
+        try {
+            const facId = interaction.options.getString("facid", true);
+            if(stakeoutStore.has(facId))
+                return await interaction.reply(`Already staking out ${facId}`);
+            await interaction.reply(`Started staking out ${facId}`);
+            const channel = interaction.client.channels.cache.get(process.env.CHANNEL_ID);
             const reply = await checkStatus(process.env.API_KEY, facId, channel);
-            await interaction.editReply(reply);
-        }, 30000);
-        stakeoutStore.set(facId, intervalId);
+            let message;
+            if(reply.length >= 4000)
+                message = await channel.send("Message too long, exceeds 4000 characters");
+            else
+                message = await channel.send(reply);
+            const intervalId = setInterval(async() => {
+                const reply = await checkStatus(process.env.API_KEY, facId, channel);
+                if(reply.length >= 4000)
+                    await message.edit("Message too long, exceeds 4000 characters");
+                else
+                    await message.edit(reply);
+            }, 30000);
+            stakeoutStore.set(facId, {"interval": intervalId, "message": message.id});
+        }
+        catch(e) {
+            console.log(e);
+            channel.send(`Error while staking out ${e}`);
+        }
     },
-    checkStatus,
 };
 async function checkStatus(apiKey, facId, channel)
 {
@@ -30,7 +42,7 @@ async function checkStatus(apiKey, facId, channel)
         const ids = [];
         const targets = [];
         for(const member of memberData.members) {
-            if(member.status.state == "Hospital" && member.status.until - Date.now() / 1000 < 300)
+            if(member.status.state == "Okay" || member.status.state == "Hospital" && !member.status.description.includes(" a ") && member.status.until - Date.now() / 1000 < 300)
                 targets.push(member.id);
             if(member.status.state == "Traveling" && statusStore.has(member.id)) {
                 const status = statusStore.get(member.id).status;
@@ -46,7 +58,10 @@ async function checkStatus(apiKey, facId, channel)
             const stats = await safeFetch(`https://ffscouter.com/api/v1/get-stats?key=${process.env.FFSCOUTER_KEY}&targets=${sorted.join()}`, channel);
             for(const stat of stats) {
                 const member = statusStore.get(stat.player_id);
-                reply += `\n[${member.name}](https://torn.com/profiles.php?XID=${stat.player_id}) (${stat.bs_estimate_human}) out <t:${member.status.until}:R> [Attack](https://www.torn.com/page.php?sid=attack&user2ID=${stat.player_id})`;
+                if(member.status.state == "Okay")
+                    reply += `\n[Attack](https://www.torn.com/page.php?sid=attack&user2ID=${stat.player_id}) [${member.name}](https://torn.com/profiles.php?XID=${stat.player_id}) (${stat.bs_estimate_human}) out`;
+                else
+                    reply += `\n[Attack](https://www.torn.com/page.php?sid=attack&user2ID=${stat.player_id}) [${member.name}](https://torn.com/profiles.php?XID=${stat.player_id}) (${stat.bs_estimate_human}) out <t:${member.status.until}:R>`;
             }
         }
         return reply;
@@ -62,16 +77,16 @@ function getTime(description, planeType)
     if(planeType == "light_aircraft") multiplier *= 0.7;
     else if(planeType == "airliner") multiplier *= 0.3;
     let time = 0;
-    if(description.contains("Mexico")) time = 26;
-    if(description.contains("Cayman")) time = 35;
-    if(description.contains("Canada")) time = 41;
-    if(description.contains("Hawaii")) time = 134;
-    if(description.contains("United Kingdom")) time = 26;
-    if(description.contains("Argentina")) time = 167;
-    if(description.contains("Switzerland")) time = 175;
-    if(description.contains("Japan")) time = 225;
-    if(description.contains("China")) time = 242;
-    if(description.contains("United Arab Emirates")) time = 271;
-    if(description.contains("South Africa")) time = 297;
+    if(description.includes("Mexico")) time = 26;
+    if(description.includes("Cayman")) time = 35;
+    if(description.includes("Canada")) time = 41;
+    if(description.includes("Hawaii")) time = 134;
+    if(description.includes("United Kingdom")) time = 26;
+    if(description.includes("Argentina")) time = 167;
+    if(description.includes("Switzerland")) time = 175;
+    if(description.includes("Japan")) time = 225;
+    if(description.includes("China")) time = 242;
+    if(description.includes("United Arab Emirates")) time = 271;
+    if(description.includes("South Africa")) time = 297;
     return time * 60 * multiplier + Date.now() / 1000 - 60;
 }
