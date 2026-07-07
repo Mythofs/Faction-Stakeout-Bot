@@ -15,7 +15,7 @@ module.exports = {
             const message = await channel.messages.fetch(info.message);
             await message.delete();
             stakeoutStore.delete(facId);
-            return interaction.reply(`Stopped staking out ${facId}`);
+            return interaction.reply(`Stopped staking out ${info.info.basic.name}`);
         }
         catch(e) {
             console.log(e);
