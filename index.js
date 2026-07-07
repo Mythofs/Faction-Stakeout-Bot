@@ -1,11 +1,7 @@
 const { Client, Collection, Events, GatewayIntentBits, MessageFlags } = require('discord.js');
 const fs = require('node:fs');
 const path = require('node:path');
-<<<<<<< HEAD
 require('dotenv').config({ path: path.resolve(__dirname, '../private/.env') });
-=======
-require('dotenv').config();
->>>>>>> f4c3d9cfd333fa9d33dd546b05039bca1aab36cf
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
@@ -39,10 +35,4 @@ for(const file of eventFiles) {
         client.on(event.name, (...args) => event.execute(...args));
     }
 }
-<<<<<<< HEAD
-=======
-
-client.once('clientReady', async () => {
-});
->>>>>>> f4c3d9cfd333fa9d33dd546b05039bca1aab36cf
 client.login(process.env.TOKEN);
