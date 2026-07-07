@@ -39,7 +39,7 @@ async function checkStatus(apiKey, facId, channel)
 {
     try {
         const memberData = await safeFetch(`https://api.torn.com/v2/faction/${facId}/members?striptags=true&timestamp=${Date.now()/1000}&comment=Faction%20Stakeout&key=${apiKey}`, channel);
-        let reply =`Available Targets:`;
+        let reply =`${facId} Available Targets:`;
         const ids = [];
         const targets = [];
         for(const member of memberData.members) {
