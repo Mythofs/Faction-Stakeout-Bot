@@ -11,15 +11,11 @@ module.exports = {
             const facId = interaction.options.getString("facid", true);
             const channel = interaction.client.channels.cache.get(process.env.CHANNEL_ID);
             if(stakeoutStore.has(facId)) {
-                const info = stakeoutStore.get(facId);
-                clearInterval(info.interval);
-                for(const id of info.message) {
-                    const message = await channel.messages.fetch(id);
-                    await message.delete();
-                    stakeoutStore.delete(facId);
-                }
-                return interaction.reply(`Stopped staking out ${info.info.basic.name}`);
+                deleteStakeout(facId);
+                return await interaction.reply(`Stopped staking out ${info.info.basic.name}`);
             }
+            if(stakeoutStore.size > 0)
+                deleteStakeout(facId);
             const facInfo = await safeFetch(`https://api.torn.com/v2/faction/${facId}/basic?comment=Faction%20Stakeout&key=${process.env.API_KEY}`, channel);
             if(!facInfo) return;
             await interaction.reply(`Started staking out ${facInfo.basic.name} (${facId})`);
@@ -58,12 +54,13 @@ module.exports = {
 async function checkStatus(apiKey, facId, facName, channel)
 {
     try {
-        const memberData = await safeFetch(`https://api.torn.com/v2/faction/${facId}/members?striptags=true&timestamp=${Date.now()/1000}&comment=Faction%20Stakeout&key=${apiKey}`, channel);
+        const memberData = await safeFetch(`https://www.tornstats.com/api/v2/${process.env.TORNSTATS_KEY}/spy/faction/${facId}`, channel);
         if(!memberData) return;
-        let reply = [`${facName} (${facId}) Available Targets:`];
+        const reply = [`${facName} (${facId}) Available Targets:`];
         let index = 0;
-        const ids = [];
+        const missingStats = [];
         const targets = [];
+        const formatter = new Intl.NumberFormat("en-US", {notation: "compact"});
         for(const member of memberData.members) {
             if(member.status.state == "Okay" || member.status.state == "Hospital" && !member.status.description.includes(" a ") && member.status.until - Date.now() / 1000 < 300)
                 targets.push(member.id);
@@ -77,19 +74,27 @@ async function checkStatus(apiKey, facId, facName, channel)
                 else if(status.state == "Abroad")
                     member.status.until = getTime(member.status.description, member.status.plane_image_type);
             }
-            statusStore.set(member.id, member);
+            statusStore.set(member.id, { "memberData": member});
+            if("spy" in member && Math.floor(Date.now() / 1000) - member.spy.timestamp < 604800)
+                statusStore.get(member.id).stats = formatter.format(member.spy.total);
+            else
+                missingStats.push(member.id);
+        }
+        if(missingStats.length > 0) {
+            const stats = await safeFetch(`https://ffscouter.com/api/v1/get-stats?key=${process.env.FFSCOUTER_KEY}&targets=${missingStats.join()}`, channel);
+            if(!stats) return;
+            for(const stat of stats)
+                statusStore.get(stat.player_id).stats = stat.bs_estimate_human;
         }
         if(targets.length > 0) {
             const sorted = targets.sort((a, b) => statusStore.get(a).status.until - statusStore.get(b).status.until);
-            const stats = await safeFetch(`https://ffscouter.com/api/v1/get-stats?key=${process.env.FFSCOUTER_KEY}&targets=${sorted.join()}`, channel);
-            if(!stats) return;
-            for(const stat of stats) {
-                const member = statusStore.get(stat.player_id);
+            for(const target of sorted) {
+                const member = statusStore.get(target);
                 let s = "";
                 if(member.status.state == "Okay" || member.status.state == "Abroad")
-                    s += `\n[Attack](https://www.torn.com/page.php?sid=attack&user2ID=${stat.player_id}) [${member.name}](https://torn.com/profiles.php?XID=${stat.player_id}) (${stat.bs_estimate_human}) out`;
+                    s += `\n[Attack](https://www.torn.com/page.php?sid=attack&user2ID=${target}) [${member.name}](https://torn.com/profiles.php?XID=${target}) (${member.stats}) out`;
                 else
-                    s += `\n[Attack](https://www.torn.com/page.php?sid=attack&user2ID=${stat.player_id}) [${member.name}](https://torn.com/profiles.php?XID=${stat.player_id}) (${stat.bs_estimate_human}) out <t:${member.status.until}:R>`;
+                    s += `\n[Attack](https://www.torn.com/page.php?sid=attack&user2ID=${target}) [${member.name}](https://torn.com/profiles.php?XID=${target}) (${member.stats}) out <t:${member.status.until}:R>`;
                 if(member.status.color == "blue") {
                     const match = member.status.description.match(/^(?:traveling from torn to (.+)|traveling from (.+) to torn|in (.+))$/i);
                     const country = (match[1] || match[2] || match[3]).trim();
@@ -114,6 +119,17 @@ async function checkStatus(apiKey, facId, facName, channel)
         channel.send("Error while checking status" + e);
         return "";
     }
+}
+function deleteStakeout(facId)
+{
+    const info = stakeoutStore.get(facId);
+    clearInterval(info.interval);
+    for(const id of info.message) {
+        const message = await channel.messages.fetch(id);
+        await message.delete();
+    }
+    stakeoutStore.clear();
+    statusStore.clear();
 }
 function getTime(description, planeType)
 {
