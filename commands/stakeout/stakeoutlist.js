@@ -2,7 +2,7 @@ const { SlashCommandBuilder } = require("discord.js");
 const stakeoutStore = require("../../stakeoutStore.js");
 
 module.exports = {
-    data: new SlashCommandBuilder().setName("list").setDescription("Lists all factions being staked out"),
+    data: new SlashCommandBuilder().setName("stakeoutlist").setDescription("Lists all factions being staked out"),
     async execute(interaction) {
         try {
             if(stakeoutStore.size == 0)

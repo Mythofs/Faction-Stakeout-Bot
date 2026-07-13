@@ -27,7 +27,7 @@ module.exports = {
             const reply = await checkStatus(process.env.API_KEY, facId, facInfo.basic.name, channel);
             for(const i in reply)
                 messages[i] = await channel.send(reply[i]);
-            stakeoutStore.set(facId, {"interval": intervalId, "message": messages.map(message => message.id), "info": facInfo});
+            stakeoutStore.set(facId, {"message": messages.map(message => message.id), "info": facInfo});
             const intervalId = setInterval(async() => {
                 try {
                     const reply = await checkStatus(process.env.API_KEY, facId, facInfo.basic.name, channel);
@@ -35,8 +35,8 @@ module.exports = {
                         if(messages[i] == null)
                             messages[i] = await channel.send(reply[i]);
                         else
-                            messages = await messages[i].edit(reply[i]);
-                    for(const i = index; i < messages.length; i++) {
+                            messages[i] = await messages[i].edit(reply[i]);
+                    for(const i = reply.length; i < messages.length; i++) {
                         await messages[i].delete();
                         mesasges[i] = null;
                     }
@@ -47,6 +47,7 @@ module.exports = {
                     channel.send(`Error while staking out ${e}`);
                 }
             }, 30000);
+            stakeoutStore.get(facId).interval = intervalId;
         }
         catch(e) {
             console.log(e);
@@ -99,8 +100,10 @@ async function checkStatus(apiKey, facId, facName, channel)
                     const country = getCountry(member.status.description);
                     s += `in ${country}`;
                 }
-                if((reply[index] + s).length > 2000)
+                if((reply[index] + s).length > 2000) {
                     index++;
+                    reply[index] = "";
+                }
                 reply[index] += s;
             }
         }
