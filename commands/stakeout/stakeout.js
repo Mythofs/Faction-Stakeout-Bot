@@ -5,10 +5,18 @@ const safeFetch = require("../../safeFetch");
 
 module.exports = { 
     data: new SlashCommandBuilder().setName("stakeout").setDescription("Starts staking out a faction")
-        .addStringOption((option) => option.setName("facid").setDescription("The faction to stakeout").setRequired(true)), 
+        .addStringOption((option) => option.setName("facid").setDescription("The faction to stakeout").setRequired(false)), 
     async execute(interaction) {
         try {
             const facId = interaction.options.getString("facid", true);
+            if(!facId) {
+                if(stakeoutStore.size == 0)
+                    return await interaction.reply("Not staking out any factions");
+                let s = "";
+                for(const info of stakeoutStore.values())
+                    s += `${info.info.basic.name} (${info.info.basic.id}), `;
+                await interaction.reply(`Staking out: ${s.substring(0,s.length-2)}`);
+            }
             const channel = interaction.client.channels.cache.get(process.env.CHANNEL_ID);
             if(stakeoutStore.has(facId)) {
                 deleteStakeout(facId);
