@@ -10,31 +10,43 @@ module.exports = {
         try {
             const facId = interaction.options.getString("facid", true);
             const channel = interaction.client.channels.cache.get(process.env.CHANNEL_ID);
-            if(stakeoutStore.has(facId))
-                return await interaction.reply(`Already staking out ${facId}`);
+            if(stakeoutStore.has(facId)) {
+                const info = stakeoutStore.get(facId);
+                clearInterval(info.interval);
+                for(const id of info.message) {
+                    const message = await channel.messages.fetch(id);
+                    await message.delete();
+                    stakeoutStore.delete(facId);
+                }
+                return interaction.reply(`Stopped staking out ${info.info.basic.name}`);
+            }
             const facInfo = await safeFetch(`https://api.torn.com/v2/faction/${facId}/basic?comment=Faction%20Stakeout&key=${process.env.API_KEY}`, channel);
             if(!facInfo) return;
             await interaction.reply(`Started staking out ${facInfo.basic.name} (${facId})`);
-            const reply = await checkStatus(process.env.API_KEY, facId, channel);
-            let message;
-            if(reply.length >= 2000)
-                message = await channel.send("Message too long, exceeds 2000 characters");
-            else
-                message = await channel.send(`${facInfo.basic.name} (${facId}) ${reply}`);
+            const messages = [];
+            const reply = await checkStatus(process.env.API_KEY, facId, facInfo.basic.name, channel);
+            for(const i in reply)
+                messages[i] = await channel.send(reply[i]);
+            stakeoutStore.set(facId, {"interval": intervalId, "message": messages.map(message => message.id), "info": facInfo});
             const intervalId = setInterval(async() => {
                 try {
-                    const reply = await checkStatus(process.env.API_KEY, facId, channel);
-                    if(reply.length >= 2000)
-                        await message.edit("Message too long, exceeds 2000 characters");
-                    else
-                        await message.edit(`${facInfo.basic.name} (${facId}) ${reply}`);
+                    const reply = await checkStatus(process.env.API_KEY, facId, facInfo.basic.name, channel);
+                    for(const i in reply)
+                        if(messages[i] == null)
+                            messages[i] = await channel.send(reply[i]);
+                        else
+                            messages = await messages[i].edit(reply[i]);
+                    for(const i = index; i < messages.length; i++) {
+                        await messages[i].delete();
+                        mesasges[i] = null;
+                    }
+                    stakeoutStore.get(facId).message = messages.map(message => message.id);
                 }
                 catch(e) {
                     console.log(e);
                     channel.send(`Error while staking out ${e}`);
                 }
             }, 30000);
-            stakeoutStore.set(facId, {"interval": intervalId, "message": message.id, "info": facInfo});
         }
         catch(e) {
             console.log(e);
@@ -42,12 +54,13 @@ module.exports = {
         }
     },
 };
-async function checkStatus(apiKey, facId, channel)
+async function checkStatus(apiKey, facId, facName, channel)
 {
     try {
         const memberData = await safeFetch(`https://api.torn.com/v2/faction/${facId}/members?striptags=true&timestamp=${Date.now()/1000}&comment=Faction%20Stakeout&key=${apiKey}`, channel);
         if(!memberData) return;
-        let reply =`Available Targets:`;
+        let reply = [`${facName} (${facId}) Available Targets:`];
+        let index = 0;
         const ids = [];
         const targets = [];
         for(const member of memberData.members) {
@@ -71,20 +84,24 @@ async function checkStatus(apiKey, facId, channel)
             if(!stats) return;
             for(const stat of stats) {
                 const member = statusStore.get(stat.player_id);
+                let s = "";
                 if(member.status.state == "Okay" || member.status.state == "Abroad")
-                    reply += `\n[Attack](https://www.torn.com/page.php?sid=attack&user2ID=${stat.player_id}) [${member.name}](https://torn.com/profiles.php?XID=${stat.player_id}) (${stat.bs_estimate_human}) out`;
+                    s += `\n[Attack](https://www.torn.com/page.php?sid=attack&user2ID=${stat.player_id}) [${member.name}](https://torn.com/profiles.php?XID=${stat.player_id}) (${stat.bs_estimate_human}) out`;
                 else
-                    reply += `\n[Attack](https://www.torn.com/page.php?sid=attack&user2ID=${stat.player_id}) [${member.name}](https://torn.com/profiles.php?XID=${stat.player_id}) (${stat.bs_estimate_human}) out <t:${member.status.until}:R>`;
+                    s += `\n[Attack](https://www.torn.com/page.php?sid=attack&user2ID=${stat.player_id}) [${member.name}](https://torn.com/profiles.php?XID=${stat.player_id}) (${stat.bs_estimate_human}) out <t:${member.status.until}:R>`;
                 if(member.status.color == "blue") {
                     const match = member.status.description.match(/^(?:traveling from torn to (.+)|traveling from (.+) to torn|in (.+))$/i);
                     const country = (match[1] || match[2] || match[3]).trim();
-                    reply += ` in ${country}`;
+                    s += ` in ${country}`;
                 }
                 //" a" should cover  for both a/an
                 if(member.status.state == "Hospital" && member.status.description.includes(" a")) {
                     const country = getCountry(member.status.description);
-                    reply += `in ${country}`;
+                    s += `in ${country}`;
                 }
+                if((reply[index] + s).length > 2000)
+                    index++;
+                reply[index] += s;
             }
         }
         return reply;
