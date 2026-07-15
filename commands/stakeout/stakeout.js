@@ -8,22 +8,22 @@ module.exports = {
         .addStringOption((option) => option.setName("facid").setDescription("The faction to stakeout").setRequired(false)), 
     async execute(interaction) {
         try {
-            const facId = interaction.options.getString("facid", true);
+            const facId = interaction.options.getString("facid", false);
             if(!facId) {
                 if(stakeoutStore.size == 0)
                     return await interaction.reply("Not staking out any factions");
                 let s = "";
                 for(const info of stakeoutStore.values())
                     s += `${info.info.basic.name} (${info.info.basic.id}), `;
-                await interaction.reply(`Staking out: ${s.substring(0,s.length-2)}`);
+                return await interaction.reply(`Staking out: ${s.substring(0,s.length-2)}`);
             }
             const channel = interaction.client.channels.cache.get(process.env.CHANNEL_ID);
             if(stakeoutStore.has(facId)) {
-                deleteStakeout(facId);
+                const info = await deleteStakeout(facId, channel);
                 return await interaction.reply(`Stopped staking out ${info.info.basic.name}`);
             }
             if(stakeoutStore.size > 0)
-                deleteStakeout(facId);
+                await deleteStakeout(facId, channel);
             const facInfo = await safeFetch(`https://api.torn.com/v2/faction/${facId}/basic?comment=Faction%20Stakeout&key=${process.env.API_KEY}`, channel);
             if(!facInfo) return;
             await interaction.reply(`Started staking out ${facInfo.basic.name} (${facId})`);
@@ -40,9 +40,10 @@ module.exports = {
                             messages[i] = await channel.send(reply[i]);
                         else
                             messages[i] = await messages[i].edit(reply[i]);
-                    for(const i = reply.length; i < messages.length; i++) {
-                        await messages[i].delete();
-                        mesasges[i] = null;
+                    if(messages.length > reply.length) {
+                        for(let i = reply.length; i < messages.length; i++)
+                            await messages[i].delete();
+                        messages.length = reply.length;
                     }
                     stakeoutStore.get(facId).message = messages.map(message => message.id);
                 }
@@ -52,6 +53,7 @@ module.exports = {
                 }
             }, 30000);
             stakeoutStore.get(facId).interval = intervalId;
+            console.log(stakeoutStore.get(facId).interval);
         }
         catch(e) {
             console.log(e);
@@ -69,12 +71,12 @@ async function checkStatus(apiKey, facId, facName, channel)
         const missingStats = [];
         const targets = [];
         const formatter = new Intl.NumberFormat("en-US", {notation: "compact"});
-        for(const member of memberData.members) {
-            if(member.status.state == "Okay" || member.status.state == "Hospital" && !member.status.description.includes(" a ") && member.status.until - Date.now() / 1000 < 300)
+        for(const member of Object.values(memberData.faction.members)) {
+            if(member.status.state == "Okay" || member.status.state == "Hospital" && member.status.until - Date.now() / 1000 < 300 || member.status.state == "Abroad")
                 targets.push(member.id);
             if(member.status.state == "Traveling" && statusStore.has(member.id)) {
-                const status = statusStore.get(member.id).status;
-                if(status.until != null && status.state == "Traveling") {
+                const status = statusStore.get(member.id).memberData.status;
+                if(status.until != 0 && status.state == "Traveling") {
                     member.status.until = status.until;
                     if(status.until - Date.now() / 1000 < 300)
                         targets.push(member.id);
@@ -95,22 +97,22 @@ async function checkStatus(apiKey, facId, facName, channel)
                 statusStore.get(stat.player_id).stats = stat.bs_estimate_human;
         }
         if(targets.length > 0) {
-            const sorted = targets.sort((a, b) => statusStore.get(a).status.until - statusStore.get(b).status.until);
+            const sorted = targets.sort((a, b) => statusStore.get(a).memberData.status.until - statusStore.get(b).memberData.status.until);
             for(const target of sorted) {
                 const member = statusStore.get(target);
                 let s = "";
-                if(member.status.state == "Okay" || member.status.state == "Abroad")
-                    s += `\n[Attack](https://www.torn.com/page.php?sid=attack&user2ID=${target}) [${member.name}](https://torn.com/profiles.php?XID=${target}) (${member.stats}) out`;
+                if(member.memberData.status.state == "Okay" || member.memberData.status.state == "Abroad")
+                    s += `\n[Attack](https://www.torn.com/page.php?sid=attack&user2ID=${target}) [${member.memberData.name}](https://torn.com/profiles.php?XID=${target}) (${member.stats}) out`;
                 else
-                    s += `\n[Attack](https://www.torn.com/page.php?sid=attack&user2ID=${target}) [${member.name}](https://torn.com/profiles.php?XID=${target}) (${member.stats}) out <t:${member.status.until}:R>`;
-                if(member.status.color == "blue") {
-                    const match = member.status.description.match(/^(?:traveling from torn to (.+)|traveling from (.+) to torn|in (.+))$/i);
+                    s += `\n[Attack](https://www.torn.com/page.php?sid=attack&user2ID=${target}) [${member.memberData.name}](https://torn.com/profiles.php?XID=${target}) (${member.stats}) out <t:${member.memberData.status.until}:R>`;
+                if(member.memberData.status.color == "blue") {
+                    const match = member.memberData.status.description.match(/^(?:traveling from torn to (.+)|traveling from (.+) to torn|in (.+))$/i);
                     const country = (match[1] || match[2] || match[3]).trim();
                     s += ` in ${country}`;
                 }
                 //" a" should cover  for both a/an
-                if(member.status.state == "Hospital" && member.status.description.includes(" a")) {
-                    const country = getCountry(member.status.description);
+                if(member.memberData.status.state == "Hospital" && member.memberData.status.description.includes(" a")) {
+                    const country = getCountry(member.memberData.status.description);
                     s += `in ${country}`;
                 }
                 if((reply[index] + s).length > 2000) {
@@ -125,10 +127,10 @@ async function checkStatus(apiKey, facId, facName, channel)
     catch(e) {
         console.log(e);
         channel.send("Error while checking status" + e);
-        return "";
+        return [];
     }
 }
-function deleteStakeout(facId)
+async function deleteStakeout(facId, channel)
 {
     const info = stakeoutStore.get(facId);
     clearInterval(info.interval);
@@ -138,6 +140,7 @@ function deleteStakeout(facId)
     }
     stakeoutStore.clear();
     statusStore.clear();
+    return info;
 }
 function getTime(description, planeType)
 {
